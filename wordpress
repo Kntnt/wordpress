@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+#
+# Copyright (c) 2020 Kntnt Sweden AB. All rights reserved.
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+# 
+# 1. Redistributions of source code must retain the above copyright notice,
+#    this list of conditions and the following disclaimer.
+# 
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+# 
+# 3. Neither the name of the copyright holder nor the names of its
+#    contributors may be used to endorse or promote products derived from this
+#    software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+
+COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-$(echo ${PWD##*/}  | tr '[:upper:]' '[:lower:]')}
+MY_WP_DB_NAME=${MY_WP_DB_NAME:-$COMPOSE_PROJECT_NAME}
+MY_WP_DB_USER=${MY_WP_DB_USER:-$COMPOSE_PROJECT_NAME}
+MY_WP_DB_PASS=${MY_WP_DB_PASS:-$COMPOSE_PROJECT_NAME}
+MY_DB_ROOT_PASSWORD=${MY_DB_ROOT_PASSWORD:-password}
+
+
+function running() {
+    id=$(docker-compose ps -q wordpress)
+    [ -n "$id" ]
+    return 
+}
+
+has_docker-compose.yml () {
+  path=$(pwd)
+  while [[ "$path" != "" && ! -e "$path/docker-compose.yml" ]]; do
+    path=${path%/*}
+  done
+  [ -n "$path" ]
+  return
+}
+
+check() {
+    if ! has_docker-compose.yml; then
+        echo "No docker-compose.yml in current directory or any parent."
+        exit 1
+    fi    
+}
+
+clean() {
+    docker volume rm ${COMPOSE_PROJECT_NAME}_mysql
+    rm -rf etc wordpress docker-compose.yml
+}
+
+function up() {
+    check;
+    if running; then
+        echo "Wordpress is already running"
+        exit 2;
+    fi
+    docker-compose up -d wordpress
+}
+
+function down() {
+    check
+    if running; then
+        docker-compose down
+    fi
+}
+
+function status() {
+    check
+    running && echo "Running" || echo "Not running"
+}
+
+function logs() {
+    check
+    docker-compose logs -f
+}
+
+function init() {
+    cat <<EOT > docker-compose.yml
+version: '3.8'
+services:
+  mysql:
+    container_name: ${COMPOSE_PROJECT_NAME}_mysql
+    image: mariadb:latest
+    restart: always
+    environment:
+      MYSQL_DATABASE: $MY_WP_DB_NAME
+      MYSQL_USER: $MY_WP_DB_USER
+      MYSQL_PASSWORD: $MY_WP_DB_PASS
+      MYSQL_ROOT_PASSWORD: $MY_DB_ROOT_PASSWORD
+    volumes:
+      - mysql:/var/lib/mysql
+  phpmyadmin:
+    container_name: ${COMPOSE_PROJECT_NAME}_phpmyadmin
+    depends_on:
+      - mysql
+    image: phpmyadmin/phpmyadmin:latest
+    restart: always
+    environment:
+      PMA_HOST: mysql
+      MYSQL_ROOT_PASSWORD: $MY_DB_ROOT_PASSWORD
+    ports:
+      - 8080:80
+  wordpress:
+    container_name: ${COMPOSE_PROJECT_NAME}_wordpress
+    depends_on:
+      - mysql
+      - phpmyadmin
+    image: wordpress:latest
+    restart: always
+    environment:
+      WORDPRESS_DB_HOST: mysql
+      WORDPRESS_DB_USER: $MY_WP_DB_USER
+      WORDPRESS_DB_PASSWORD: $MY_WP_DB_PASS
+      WORDPRESS_DB_NAME: $MY_WP_DB_NAME
+    ports:
+      - 80:80
+    working_dir: /var/www/html
+    volumes:
+      - ./wordpress:/var/www/html
+volumes:
+  mysql: {}
+EOT
+}
+
+function reset() {
+    down
+    clean
+}
+
+if (( $# == 1 )) && [[ $1 == 'up' ]]; then
+    up
+elif (( $# == 1 )) && [[ $1 == 'down' ]]; then
+    down
+elif (( $# == 1 )) && [[ $1 == 'status' ]]; then
+    status
+elif (( $# == 1 )) && [[ $1 == 'logs' ]]; then
+    logs
+elif (( $# == 1 )) && [[ $1 == 'init' ]]; then
+    init
+elif (( $# == 1 )) && [[ $1 == 'reset' ]]; then
+    reset
+else
+    echo "Usage: $(basename $0) up"
+    echo "Usage: $(basename $0) down"
+    echo "Usage: $(basename $0) status"
+    echo "Usage: $(basename $0) logs"
+    echo "Usage: $(basename $0) init"
+    echo "Usage: $(basename $0) reset"
+    echo "See:   https://github.com/Kntnt/wordpress-docker-compose"
+    exit 1
+fi
