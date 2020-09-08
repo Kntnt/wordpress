@@ -17,7 +17,7 @@ First, you need to install Docker and start it. It's really easy. Just follow th
 
 Download [the script](https://github.com/Kntnt/wordpress/blob/master/wordpress), put in your path and make it executable.
 
-##Using 
+## Using 
 
 ### Initializing
 
